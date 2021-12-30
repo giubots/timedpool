@@ -3,10 +3,11 @@
 # pylint: disable=missing-function-docstring
 # pylint: disable=invalid-name
 # pylint: disable=import-error
+import time
+from datetime import timedelta
 from unittest import TestCase
 
-
-from src.timedpool import TimedPool, FullException
+from src.timedpool import FullException, TimedPool
 
 
 class TestTimedPool(TestCase):
@@ -47,8 +48,14 @@ class TestTimedPool(TestCase):
         p.stop()
 
     def test_deletion(self):
-        # TODO: test deletion
-        pass
+        p = TimedPool(ttl=timedelta(seconds=1), clean_t=1)
+        p['key'] = 'value'
+        self.assertEqual(p['key'], 'value')
+
+        time.sleep(3)
+
+        self.assertFalse('key' in p)
+        p.stop()
 
 
 class TestTimedPoolCompat(TestCase):
@@ -105,7 +112,7 @@ class TestTimedPoolCompat(TestCase):
         p.stop()
 
     def test_delitem(self):
-        k, v = list(self.el.items())[0]
+        k, _ = list(self.el.items())[0]
         self.assertTrue(k in self.p)
         del self.p[k]
         self.assertFalse(k in self.p)
@@ -126,12 +133,12 @@ class TestTimedPoolCompat(TestCase):
         self.assertListEqual(list(self.p), list(self.el))
 
     def test_contain(self):
-        k, v = list(self.el.items())[0]
+        k, _ = list(self.el.items())[0]
         self.assertTrue(k in self.p)
         self.assertFalse('Not' in self.p)
 
     def test_not_contain(self):
-        k, v = list(self.el.items())[0]
+        k, _ = list(self.el.items())[0]
         self.assertFalse(k not in self.p)
         self.assertTrue('Not' not in self.p)
 

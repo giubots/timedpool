@@ -37,7 +37,7 @@ class TimedPool(dict[_KT, _VT]):
 
     The `stop()` method can be used to stop the cleaning routine.
 
-    Both `max_size` and `clean_t` must be greather or equal to 0, negative
+    Both `max_size` and `clean_t` must be greater or equal to 0, negative
     values are rounded to 0.
 
     The `initial` parameter can be an iterable of tuples that is used to
@@ -80,10 +80,10 @@ class TimedPool(dict[_KT, _VT]):
         while self._running:
             with self._lock:
                 now = datetime.now()
-                deleting = [k for k, v in self.items()
-                            if v["expireTime"] < now]
+                deleting = [k for k, v in super().items()
+                            if v['expireTime'] < now]
                 for key in deleting:
-                    del self[key]
+                    super().__delitem__(key)
             if deleting:
                 logging.getLogger().debug("entries expired: %s", len(deleting))
             await asyncio.sleep(self.clean_t)
@@ -157,7 +157,7 @@ class TimedPool(dict[_KT, _VT]):
         raise NotImplementedError()
 
     def __getitem__(self, key: _KT) -> _VT:
-        return super().__getitem__(key)["data"]
+        return super().__getitem__(key)['data']
 
     def __setitem__(self, key: _KT, val: _VT) -> None:
         return self.set(key, val)
