@@ -3,7 +3,6 @@
 Adapted from https://stackoverflow.com/a/3927345/6571785
 """
 import asyncio
-from collections import UserDict
 import logging
 import threading
 import time
@@ -12,10 +11,10 @@ from typing import Iterable, Tuple, TypeVar, Union
 
 _KT = TypeVar("_KT")
 _VT = TypeVar("_VT")
-Initial = Union[Iterable[tuple[_KT, _VT]], dict[_KT, _VT]]
+Initial = Union[Iterable[Tuple[_KT, _VT]], dict[_KT, _VT]]
 
 
-class TimedPool(dict):
+class TimedPool(dict[_KT, _VT]):
     """A dict with a maximum size whose elements are deleted after a delay.
 
     This object can be used as a dictionary:
@@ -58,11 +57,11 @@ class TimedPool(dict):
                  ttl: timedelta = timedelta(hours=1),
                  clean_t: int = 120,
                  initial: Initial = None):
+        super().__init__()
         self.max_size = max_size if max_size >= 0 else 0
         self.ttl = ttl
         self.clean_t = clean_t if clean_t >= 0 else 0
 
-        self._cache = {}
         self._lock = threading.Lock()
         self._running = True
         self._loop = asyncio.new_event_loop()
@@ -74,20 +73,17 @@ class TimedPool(dict):
             if isinstance(initial, dict):
                 initial = initial.items()
             for k, v in initial:
-                try:
-                    self.set(k, v)
-                except FullException:
-                    pass
+                self.set(k, v)
 
     async def _cleaner(self):
         """Removes expired items from this at regular intervals."""
         while self._running:
             with self._lock:
                 now = datetime.now()
-                deleting = [k for k, v in self._cache.items()
+                deleting = [k for k, v in self.items()
                             if v["expireTime"] < now]
                 for key in deleting:
-                    del self._cache[key]
+                    del self[key]
             if deleting:
                 logging.getLogger().debug("entries expired: %s", len(deleting))
             await asyncio.sleep(self.clean_t)
@@ -97,22 +93,6 @@ class TimedPool(dict):
         self._running = False
         time.sleep(1)  # otherwise when logging is active this raises NameError
         self._loop.call_soon_threadsafe(self._loop.stop)
-
-    def __setitem__(self, key, val):
-        return self.set(key, val)
-
-    def __getitem__(self, key):
-        return self._cache[key]["data"]
-
-    def __delitem__(self, key):
-        with self._lock:
-            del self._cache[key]
-
-    def __contains__(self, key):
-        return key in self._cache
-
-    def __len__(self):
-        return len(self._cache)
 
     def set(self, key, val, ttl=None):
         """Adds a key-value pair to this.
@@ -124,17 +104,74 @@ class TimedPool(dict):
         if ttl is None:
             ttl = self.ttl
 
-        if len(self._cache) >= self.max_size and not key in self._cache:
+        if len(self) >= self.max_size and not key in self:
             raise FullException()
 
         with self._lock:
-            self._cache[key] = {
+            super().__setitem__(key, {
                 'data': val,
                 'expireTime': datetime.now() + ttl,
-            }
+            })
 
-    def clear(self):
-        self._cache.clear()
+    def get(self, key, default=None) -> _VT:
+        if key in self:
+            return self[key]
+        return default
+
+    def clear(self) -> None:
+        with self._lock:
+            super().clear()
+
+    def copy(self) -> dict[_KT, _VT]:
+        # TODO: implement copy & test
+        raise NotImplementedError()
+
+    def pop(self, key, default=None) -> _VT:
+        if key in self:
+            val = self[key]
+            del self[key]
+            return val
+        if default is not None:
+            return default
+        raise KeyError()
+
+    def popitem(self) -> tuple[_KT, _VT]:
+        with self._lock:
+            item = super().popitem()
+        return (item[0], item[1]['data'])
+
+    def setdefault(self, key: _KT, default: _VT) -> _VT:
+        # TODO: implement setdefault & test
+        raise NotImplementedError()
+
+    def update(self, **kwargs: _VT) -> None:
+        # TODO: implement update & test
+        raise NotImplementedError()
+
+    def values(self):
+        # TODO: implement values & test
+        raise NotImplementedError()
+
+    def items(self):
+        # TODO: implement items & test
+        raise NotImplementedError()
+
+    def __getitem__(self, key: _KT) -> _VT:
+        return super().__getitem__(key)["data"]
+
+    def __setitem__(self, key: _KT, val: _VT) -> None:
+        return self.set(key, val)
+
+    def __delitem__(self, key) -> None:
+        with self._lock:
+            super().__delitem__(key)
+
+    @classmethod
+    def fromkeys(cls, iterable: Iterable[_KT], value: _VT = None) -> 'TimedPool[_KT, _VT | None]':
+        pool = TimedPool()
+        for i in iterable:
+            pool[i] = value
+        return pool
 
 
 class FullException(Exception):
