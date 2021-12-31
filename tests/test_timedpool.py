@@ -7,7 +7,7 @@ import time
 from datetime import timedelta
 from unittest import TestCase
 
-from src.timedpool import FullException, TimedPool
+from timedpool import FullException, TimedPool
 
 
 class TestTimedPool(TestCase):

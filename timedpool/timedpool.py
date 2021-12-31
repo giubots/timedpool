@@ -2,10 +2,8 @@
 
 Adapted from https://stackoverflow.com/a/3927345/6571785
 """
-import asyncio
 import logging
 import threading
-import time
 from datetime import datetime, timedelta
 from typing import Iterable, Tuple, TypeVar, Union
 
@@ -62,12 +60,10 @@ class TimedPool(dict[_KT, _VT]):
         self.ttl = ttl
         self.clean_t = clean_t if clean_t >= 0 else 0
 
-        self._lock = threading.Lock()
-        self._running = True
-        self._loop = asyncio.new_event_loop()
-        self._thread = threading.Thread(target=self._loop.run_forever)
-        self._thread.start()
-        asyncio.run_coroutine_threadsafe(self._cleaner(), self._loop)
+        self._cv = threading.Condition()
+        self._running = False
+        self._thread = None
+        self.start()
 
         if initial is not None:
             if isinstance(initial, dict):
@@ -75,24 +71,35 @@ class TimedPool(dict[_KT, _VT]):
             for k, v in initial:
                 self.set(k, v)
 
-    async def _cleaner(self):
+    def _cleaner(self):
         """Removes expired items from this at regular intervals."""
         while self._running:
-            with self._lock:
+            with self._cv:
                 now = datetime.now()
                 deleting = [k for k, v in super().items()
                             if v['expireTime'] < now]
                 for key in deleting:
                     super().__delitem__(key)
-            if deleting:
-                logging.getLogger().debug("entries expired: %s", len(deleting))
-            await asyncio.sleep(self.clean_t)
+                if deleting:
+                    logging.getLogger().debug("entries expired: %s", len(deleting))
+                self._cv.wait(self.clean_t)
+
+    def start(self):
+        """Start the cleaning routine in a new thread."""
+        if self._running:
+            return
+        self._running = True
+        self._thread = threading.Thread(target=self._cleaner)
+        self._thread.start()
 
     def stop(self):
         """Stops the cleaning routine and allows the thread to terminate."""
-        self._running = False
-        time.sleep(1)  # otherwise when logging is active this raises NameError
-        self._loop.call_soon_threadsafe(self._loop.stop)
+        if not self._running:
+            return
+        with self._cv:
+            self._running = False
+            self._cv.notify_all()
+        self._thread.join()
 
     def set(self, key, val, ttl=None):
         """Adds a key-value pair to this.
@@ -107,7 +114,7 @@ class TimedPool(dict[_KT, _VT]):
         if len(self) >= self.max_size and not key in self:
             raise FullException()
 
-        with self._lock:
+        with self._cv:
             super().__setitem__(key, {
                 'data': val,
                 'expireTime': datetime.now() + ttl,
@@ -115,11 +122,11 @@ class TimedPool(dict[_KT, _VT]):
 
     def get(self, key, default=None) -> _VT:
         if key in self:
-            return self[key]
+            return super().get(key)['data']
         return default
 
     def clear(self) -> None:
-        with self._lock:
+        with self._cv:
             super().clear()
 
     def copy(self) -> dict[_KT, _VT]:
@@ -136,7 +143,7 @@ class TimedPool(dict[_KT, _VT]):
         raise KeyError()
 
     def popitem(self) -> tuple[_KT, _VT]:
-        with self._lock:
+        with self._cv:
             item = super().popitem()
         return (item[0], item[1]['data'])
 
@@ -157,14 +164,17 @@ class TimedPool(dict[_KT, _VT]):
         raise NotImplementedError()
 
     def __getitem__(self, key: _KT) -> _VT:
-        return super().__getitem__(key)['data']
+        return self.get(key)
 
     def __setitem__(self, key: _KT, val: _VT) -> None:
         return self.set(key, val)
 
     def __delitem__(self, key) -> None:
-        with self._lock:
+        with self._cv:
             super().__delitem__(key)
+
+    def __del__(self) -> None:
+        self.stop()
 
     @classmethod
     def fromkeys(cls, iterable: Iterable[_KT], value: _VT = None) -> 'TimedPool[_KT, _VT | None]':
