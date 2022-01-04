@@ -81,7 +81,8 @@ class TimedPool(dict[_KT, _VT]):
                 for key in deleting:
                     super().__delitem__(key)
                 if deleting:
-                    logging.getLogger().debug("entries expired: %s", len(deleting))
+                    logging.getLogger(__name__).debug(
+                        "entries expired: %s", len(deleting))
                 self._cv.wait(self.clean_t)
 
     def start(self):
